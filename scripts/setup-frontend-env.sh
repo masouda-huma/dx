@@ -186,7 +186,7 @@ get_github_token() {
             has_registry=true
         fi
 
-        if grep -q "^$token_prefix" "$npmrc_file"; then
+        if grep -q "^$HUMA_NPM_TOKEN_PREFIX" "$npmrc_file"; then
             has_token=true
         fi
     fi
@@ -225,7 +225,7 @@ get_github_token() {
         print_info "Add these lines to ~/.npmrc:"
         echo ""
         echo "$HUMA_NPM_REGISTRY"
-        echo "${token_prefix}YOUR_GITHUB_TOKEN"
+        echo "${HUMA_NPM_TOKEN_PREFIX}YOUR_GITHUB_TOKEN"
         echo ""
         return 0
     fi
@@ -247,8 +247,8 @@ get_github_token() {
     fi
 
     # Add or update token line without replacing the rest of the file
-    local token_line="${token_prefix}${github_token}"
-    if grep -q "^$token_prefix" "$npmrc_file" 2>/dev/null; then
+    local token_line="${HUMA_NPM_TOKEN_PREFIX}${github_token}"
+    if grep -q "^$HUMA_NPM_TOKEN_PREFIX" "$npmrc_file" 2>/dev/null; then
         if command_exists perl; then
             perl -0pi -e 's|^//npm\.pkg\.github\.com/:_authToken=.*$|'"$token_line"'|m' "$npmrc_file"
         else
