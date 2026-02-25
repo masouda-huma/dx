@@ -68,15 +68,25 @@ command_exists() {
 
 # Get shell profile file
 get_shell_profile() {
-    if [ -n "$ZSH_VERSION" ]; then
+    local current_shell
+    current_shell=$(basename "$SHELL")
+
+    if [[ "$current_shell" == "zsh" ]]; then
         echo "$HOME/.zshrc"
-    elif [ -n "$BASH_VERSION" ]; then
-        if [ -f "$HOME/.bash_profile" ]; then
+    elif [[ "$current_shell" == "bash" ]]; then
+        # Check for existing bash files (Linux prefers .bashrc, macOS prefers .bash_profile)
+        if [[ -f "$HOME/.bashrc" ]]; then
+            echo "$HOME/.bashrc"
+        elif [[ -f "$HOME/.bash_profile" ]]; then
             echo "$HOME/.bash_profile"
         else
+            # Default fallback for bash if neither exists
             echo "$HOME/.bashrc"
         fi
+    elif [[ "$current_shell" == "fish" ]]; then
+        echo "$HOME/.config/fish/config.fish"
     else
+        # Generic fallback for sh, dash, ksh, etc.
         echo "$HOME/.profile"
     fi
 }
@@ -366,8 +376,7 @@ final_verification() {
         echo ""
         print_info "Next steps:"
         echo "  1. Restart your terminal or run: source $(get_shell_profile)"
-        echo "  2. Create a new Angular project with craft-cli"
-        echo "  3. Or clone an existing project and run 'npm install'"
+        echo "  2. Create a new Angular project with 'craft-cli' or clone an existing project"
         echo ""
     else
         print_error "Some components failed to install. Please check the errors above."
