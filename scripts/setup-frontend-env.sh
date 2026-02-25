@@ -16,6 +16,12 @@ NC='\033[0m' # No Color
 # Progress tracking
 TOTAL_STEPS=5
 CURRENT_STEP=0
+NPMRC_BACKUP_PATH=""
+
+HUMA_NPM_REGISTRY_PREFIX="@huma-engineering:registry"
+HUMA_NPM_REGISTRY_VALUE="https://npm.pkg.github.com"
+HUMA_NPM_REGISTRY="$HUMA_NPM_REGISTRY_PREFIX=$HUMA_NPM_REGISTRY_VALUE"
+HUMA_NPM_TOKEN_PREFIX="//npm.pkg.github.com/:_authToken="
 
 # Print banner
 print_banner() {
@@ -55,18 +61,6 @@ print_info() {
     echo -e "${CYAN}ℹ $1${NC}"
 }
 
-# Progress bar
-print_progress() {
-    local progress=$((CURRENT_STEP * 100 / TOTAL_STEPS))
-    local filled=$((progress / 5))
-    local empty=$((20 - filled))
-    
-    printf "${GREEN}Progress: ["
-    printf "%${filled}s" | tr ' ' '█'
-    printf "%${empty}s" | tr ' ' '░'
-    printf "] %d%%${NC}\n" "$progress"
-}
-
 # Check if command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
@@ -100,7 +94,6 @@ install_nvm() {
         
         if command_exists nvm; then
             print_success "NVM is already installed (version: $(nvm --version))"
-            print_progress
             return 0
         else
             print_warning "NVM directory exists but command not found. Reinstalling..."
@@ -122,8 +115,6 @@ install_nvm() {
         print_error "NVM installation failed"
         exit 1
     fi
-    
-    print_progress
 }
 
 # Step 2: Install Node.js LTS
@@ -153,7 +144,6 @@ install_nodejs() {
         
         print_success "Node.js: $current_version"
         print_success "npm: $(npm --version)"
-        print_progress
         return 0
     fi
     
@@ -171,8 +161,6 @@ install_nodejs() {
         print_error "Node.js installation failed"
         exit 1
     fi
-    
-    print_progress
 }
 
 # Step 3: Get GitHub Token
@@ -180,12 +168,31 @@ get_github_token() {
     print_step "Configure GitHub Personal Access Token"
     
     local npmrc_file="$HOME/.npmrc"
+    local has_registry=false
+    local has_token=false
+
+    if [ -f "$npmrc_file" ]; then
+        if grep -q "^$HUMA_NPM_REGISTRY" "$npmrc_file"; then
+            has_registry=true
+        fi
+
+        if grep -q "^$token_prefix" "$npmrc_file"; then
+            has_token=true
+        fi
+    fi
     
-    # Check if token already exists in .npmrc
-    if [ -f "$npmrc_file" ] && grep -q "//npm.pkg.github.com/:_authToken=" "$npmrc_file"; then
-        print_success "GitHub token already configured in ~/.npmrc"
-        print_progress
+    # Check if registry and token already exist in .npmrc
+    if [ "$has_registry" = true ] && [ "$has_token" = true ]; then
+        print_success "GitHub registry and token already configured in ~/.npmrc"
         return 0
+    fi
+
+    if [ "$has_registry" != true ]; then
+        print_warning "GitHub registry entry missing in ~/.npmrc"
+    fi
+
+    if [ "$has_token" != true ]; then
+        print_warning "GitHub token missing in ~/.npmrc"
     fi
     
     print_info "GitHub Personal Access Token (classic) is needed for private packages."
@@ -201,35 +208,53 @@ get_github_token() {
         print_warning "No token provided. You'll need to manually configure ~/.npmrc."
         print_info "Add these lines to ~/.npmrc:"
         echo ""
-        echo "@huma-engineering:registry=https://npm.pkg.github.com"
-        echo "//npm.pkg.github.com/:_authToken=YOUR_GITHUB_TOKEN"
+        echo "$HUMA_NPM_REGISTRY"
+        echo "${token_prefix}YOUR_GITHUB_TOKEN"
         echo ""
-        print_progress
         return 0
     fi
     
     # Backup existing .npmrc if it exists
     if [ -f "$npmrc_file" ]; then
-        cp "$npmrc_file" "$npmrc_file.backup.$(date +%Y%m%d_%H%M%S)"
-        print_info "Existing .npmrc backed up"
+        local backup_file="$npmrc_file.backup.$(date +%Y%m%d_%H%M%S)"
+        cp "$npmrc_file" "$backup_file"
+        print_info "Existing .npmrc backed up to $backup_file"
+        NPMRC_BACKUP_PATH="$backup_file"
     fi
     
-    # Check if registry line exists
-    if ! grep -q "@huma-engineering:registry=" "$npmrc_file" 2>/dev/null; then
-        echo "@huma-engineering:registry=https://npm.pkg.github.com" >> "$npmrc_file"
+    # Ensure npmrc exists before editing
+    touch "$npmrc_file"
+
+    # Ensure registry line exists
+    if ! grep -q "^$HUMA_NPM_REGISTRY" "$npmrc_file" 2>/dev/null; then
+        printf "\n%s\n" "$HUMA_NPM_REGISTRY" >> "$npmrc_file"
     fi
-    
-    # Remove old token line if exists
-    if [ -f "$npmrc_file" ]; then
-        grep -v "//npm.pkg.github.com/:_authToken=" "$npmrc_file" > "$npmrc_file.tmp" || true
-        mv "$npmrc_file.tmp" "$npmrc_file"
+
+    # Add or update token line without replacing the rest of the file
+    local token_line="${token_prefix}${github_token}"
+    if grep -q "^$token_prefix" "$npmrc_file" 2>/dev/null; then
+        if command_exists perl; then
+            perl -0pi -e 's|^//npm\.pkg\.github\.com/:_authToken=.*$|'"$token_line"'|m' "$npmrc_file"
+        else
+            tmp_file=$(mktemp)
+            awk -v token_line="$token_line" '
+                BEGIN { replaced=0 }
+                {
+                    if ($0 ~ /^\/\/npm\.pkg\.github\.com\/:_authToken=/ && replaced == 0) {
+                        print token_line
+                        replaced = 1
+                    } else {
+                        print
+                    }
+                }
+            ' "$npmrc_file" > "$tmp_file"
+            mv "$tmp_file" "$npmrc_file"
+        fi
+    else
+        printf "\n%s\n" "$token_line" >> "$npmrc_file"
     fi
-    
-    # Add token
-    echo "//npm.pkg.github.com/:_authToken=$github_token" >> "$npmrc_file"
-    
+
     print_success "GitHub token configured in ~/.npmrc"
-    print_progress
 }
 
 # Step 4: Install Angular CLI
@@ -245,7 +270,6 @@ install_angular_cli() {
             
             if [[ "$current_version" == "20.0.0" ]]; then
                 print_success "Angular CLI 20.0.0 is already installed"
-                print_progress
                 return 0
             else
                 print_info "Updating to version 20.0.0..."
@@ -263,8 +287,6 @@ install_angular_cli() {
         print_error "Angular CLI installation failed"
         exit 1
     fi
-    
-    print_progress
 }
 
 # Step 5: Final Verification
@@ -316,6 +338,21 @@ final_verification() {
     # .npmrc
     if [ -f "$HOME/.npmrc" ]; then
         print_success ".npmrc: Configured"
+        if [ -n "$NPMRC_BACKUP_PATH" ]; then
+            print_info "Previous .npmrc backup saved at $NPMRC_BACKUP_PATH"
+        fi
+
+        if [[ "$(npm config get $HUMA_NPM_REGISTRY_PREFIX)" == *"$HUMA_NPM_REGISTRY_VALUE"* ]]; then
+            print_success "GitHub registry entry correctly set in npm config"
+        else
+            print_warning "GitHub registry entry not found in npm config (you may need to configure it manually)"
+        fi
+
+        if npm whoami --registry="$HUMA_NPM_REGISTRY_VALUE" >/dev/null 2>&1; then
+            print_success "GitHub token is valid and working"
+        else
+            print_warning "GitHub token may not be working (you may need to configure it manually)"
+        fi
     else
         print_warning ".npmrc: Not found (you may need to configure it manually)"
     fi
@@ -324,7 +361,7 @@ final_verification() {
     
     if [ "$all_good" = true ]; then
         echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
-        echo -e "${GREEN}║            🎉 Setup completed successfully! 🎉              ║${NC}"
+        echo -e "${GREEN}║            🎉 Setup completed successfully! 🎉             ║${NC}"
         echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
         echo ""
         print_info "Next steps:"
@@ -336,8 +373,6 @@ final_verification() {
         print_error "Some components failed to install. Please check the errors above."
         exit 1
     fi
-    
-    print_progress
 }
 
 # Main execution
