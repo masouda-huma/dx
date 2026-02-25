@@ -209,9 +209,15 @@ get_github_token() {
     print_info "The token should have 'read:packages' and 'repo' scopes."
     echo ""
     
-    # Prompt for token
+    # Prompt for token (read from TTY if stdin is piped)
     echo -n "Enter your GitHub Personal Access Token (or press Enter to skip): "
-    read -s github_token
+    if [ -t 0 ]; then
+        read -s -r github_token
+    elif [ -r /dev/tty ]; then
+        read -s -r github_token < /dev/tty
+    else
+        github_token=""
+    fi
     echo ""
     
     if [ -z "$github_token" ]; then
