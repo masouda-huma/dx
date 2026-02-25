@@ -1,0 +1,55 @@
+name: Bump Version and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to tag and release from"
+        required: true
+        default: "main"
+        type: string
+      bump_type:
+        description: "Type of version bump"
+        required: true
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  bump-and-release:
+    runs-on: ubuntu-latest
+    # Required to allow the GitHub CLI to create releases and tags
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0 # Required to fetch all existing git tags
+
+      - name: Calculate Next Version
+        id: version
+        run: |
+          # Get the latest tag, or default to v0.0.0 if none exists
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+
+          # Bump the version using npx semver
+          NEXT_VERSION=$(npx semver $LATEST_TAG -i ${{ inputs.bump_type }})
+
+          echo "Bumping from $LATEST_TAG to v$NEXT_VERSION"
+          echo "new_tag=v$NEXT_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release and Tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # gh release create handles creating the git tag AND the release page
+          gh release create ${{ steps.version.outputs.new_tag }} \
+            --target ${{ inputs.branch }} \
+            --title "Release ${{ steps.version.outputs.new_tag }}" \
+            --generate-notes
